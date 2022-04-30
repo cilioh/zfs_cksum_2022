@@ -126,6 +126,9 @@
 #define	MAX_ORDER	1
 #endif
 
+//cksum_modi
+#include "/home/kau/zfs_cksum/include/hr_calclock.h"
+
 typedef struct abd_stats {
 	kstat_named_t abdstat_struct_size;
 	kstat_named_t abdstat_linear_cnt;
@@ -1283,6 +1286,85 @@ void
 abd_copy_off(abd_t *dabd, abd_t *sabd, size_t doff, size_t soff, size_t size)
 {
 	(void) abd_iterate_func2(dabd, sabd, doff, soff, size,
+	    abd_copy_off_cb, NULL);
+}
+
+//cksum_modi
+unsigned long long a_t=0, a_c=0;
+unsigned long long b_t=0, b_c=0;
+int
+abd_iterate_func2_cksum(abd_t *dabd, abd_t *sabd, size_t doff, size_t soff,
+    size_t size, abd_iter_func2_t *func, void *private)
+{
+hrtime_t a_local[2];
+a_local[0] = gethrtime();
+
+	int ret = 0;
+	struct abd_iter daiter, saiter;
+
+	//abd_verify(dabd);
+	//abd_verify(sabd);
+
+	//ASSERT3U(doff + size, <=, dabd->abd_size);
+	//ASSERT3U(soff + size, <=, sabd->abd_size);
+
+	abd_iter_init(&daiter, dabd, 0);
+	abd_iter_init(&saiter, sabd, 1);
+	abd_iter_advance(&daiter, doff);
+	abd_iter_advance(&saiter, soff);
+//#ifdef _KERNEL
+	//if(dabd->abd_size != sabd->abd_size)
+	//	printk(KERN_WARNING "DIFFDIFF=================\n");
+//	printk(KERN_WARNING "[START] dabd:%lu sabd:%lu size:%lu\n", dabd->abd_size, sabd->abd_size, size);
+//#endif
+	int i = 0;
+	while (size > 0) {
+		size_t dlen, slen, len;
+		abd_iter_map(&daiter);
+		abd_iter_map(&saiter);
+
+		dlen = MIN(daiter.iter_mapsize, size);
+		slen = MIN(saiter.iter_mapsize, size);
+		len = MIN(dlen, slen);
+		ASSERT(dlen > 0 || slen > 0);
+
+#ifdef _KERNEL
+	if(i > 0)
+		printk(KERN_WARNING "[%d] len:%lu size:%lu\n", i, len, size);
+#endif
+hrtime_t b_local[2];
+b_local[0] = gethrtime();
+		ret = func(daiter.iter_mapaddr, saiter.iter_mapaddr, len,
+		    private);
+b_local[1] = gethrtime();
+calclock(b_local, &b_t, &b_c);
+
+		abd_iter_unmap(&saiter);
+		abd_iter_unmap(&daiter);
+
+		if (ret != 0)
+			break;
+
+		size -= len;
+		abd_iter_advance(&daiter, len);
+		abd_iter_advance(&saiter, len);
+
+		i++;
+	}
+//#ifdef _KERNEL
+//	printk(KERN_WARNING "[END] dabd:%lu sabd:%lu size:%lu\n", dabd->abd_size, sabd->abd_size, size);
+//#endif
+
+a_local[1] = gethrtime();
+calclock(a_local, &a_t, &a_c);
+
+	return (ret);
+}
+
+void
+abd_copy_off_cksum(abd_t *dabd, abd_t *sabd, size_t doff, size_t soff, size_t size)
+{
+	(void) abd_iterate_func2_cksum(dabd, sabd, doff, soff, size,
 	    abd_copy_off_cb, NULL);
 }
 

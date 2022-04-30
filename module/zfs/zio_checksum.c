@@ -33,6 +33,9 @@
 #include <sys/abd.h>
 #include <zfs_fletcher.h>
 
+//cksum_modi
+#include "/home/kau/zfs_cksum/include/hr_calclock.h"
+
 /*
  * Checksum vectors.
  *
@@ -311,10 +314,14 @@ zio_checksum_template_init(enum zio_checksum checksum, spa_t *spa)
 /*
  * Generate the checksum.
  */
+unsigned long long g_t=0, g_c=0;
 void
 zio_checksum_compute(zio_t *zio, enum zio_checksum checksum,
     abd_t *abd, uint64_t size)
 {
+hrtime_t g_local[2];
+g_local[0] = gethrtime();
+
 	static const uint64_t zec_magic = ZEC_MAGIC;
 	blkptr_t *bp = zio->io_bp;
 	uint64_t offset = zio->io_offset;
@@ -344,12 +351,12 @@ zio_checksum_compute(zio_t *zio, enum zio_checksum checksum,
 			    uint64_t);
 			eck = zilc.zc_eck;
 			eck_offset = offsetof(zil_chain_t, zc_eck);
-		} else {
+		} 
+		else {
 			eck_offset = size - sizeof (zio_eck_t);
 			abd_copy_to_buf_off(&eck, abd, eck_offset,
 			    sizeof (zio_eck_t));
 		}
-
 		if (checksum == ZIO_CHECKSUM_GANG_HEADER) {
 			zio_checksum_gang_verifier(&eck.zec_cksum, bp);
 			abd_copy_from_buf_off(abd, &eck.zec_cksum,
@@ -363,7 +370,6 @@ zio_checksum_compute(zio_t *zio, enum zio_checksum checksum,
 		} else {
 			bp->blk_cksum = eck.zec_cksum;
 		}
-
 		abd_copy_from_buf_off(abd, &zec_magic,
 		    eck_offset + offsetof(zio_eck_t, zec_magic),
 		    sizeof (zec_magic));
@@ -375,7 +381,9 @@ zio_checksum_compute(zio_t *zio, enum zio_checksum checksum,
 		abd_copy_from_buf_off(abd, &cksum,
 		    eck_offset + offsetof(zio_eck_t, zec_cksum),
 		    sizeof (zio_cksum_t));
-	} else {
+		
+	} 
+	else {
 		//calling abd_fletcher_4_native function
 		ci->ci_func[0](abd, size, spa->spa_cksum_tmpls[checksum],
 		    &bp->blk_cksum);
@@ -385,13 +393,20 @@ zio_checksum_compute(zio_t *zio, enum zio_checksum checksum,
 //#endif
 	}
 
+g_local[1] = gethrtime();
+calclock(g_local, &g_t, &g_c);
+
 }
 
 //cksum_modi
+unsigned long long f_t=0, f_c=0;
 void
-cksum_zio_checksum_compute(cksum_zio_t *cksum_zio, zio_t *zio, enum zio_checksum checksum,
+cksum_zio_checksum_compute(cksum_zio_t *cksum_zio, enum zio_checksum checksum,
     abd_t *abd, uint64_t size)
 {
+hrtime_t f_local[2];
+f_local[0] = gethrtime();
+
 	static const uint64_t zec_magic = ZEC_MAGIC;
 	blkptr_t *bp = cksum_zio->io_bp;
 	uint64_t offset = cksum_zio->io_offset;
@@ -463,6 +478,9 @@ cksum_zio_checksum_compute(cksum_zio_t *cksum_zio, zio_t *zio, enum zio_checksum
 //		printk(KERN_WARNING "(%u)[CKSUM] %llu %llu %llu %llu\n", cksum_zio->id, (zcp)->zc_word[0], (zcp)->zc_word[1], (zcp)->zc_word[2], (zcp)->zc_word[3]);
 //#endif
 	}
+
+f_local[1] = gethrtime();
+calclock(f_local, &f_t, &f_c);
 
 }
 int

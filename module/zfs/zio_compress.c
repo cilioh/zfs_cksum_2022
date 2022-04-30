@@ -112,8 +112,9 @@ zio_compress_data(enum zio_compress c, abd_t *src, void *dst, size_t s_len)
 	 * If the data is all zeroes, we don't even need to allocate
 	 * a block for it.  We indicate this by returning zero size.
 	 */
-	if (abd_iterate_func(src, 0, s_len, zio_compress_zeroed_cb, NULL) == 0)
+	if (abd_iterate_func(src, 0, s_len, zio_compress_zeroed_cb, NULL) == 0){
 		return (0);
+	}
 
 	if (c == ZIO_COMPRESS_EMPTY)
 		return (s_len);

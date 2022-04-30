@@ -115,6 +115,9 @@ void abd_copy_to_buf_off(void *, abd_t *, size_t, size_t);
 int abd_cmp(abd_t *, abd_t *);
 int abd_cmp_buf_off(abd_t *, const void *, size_t, size_t);
 void abd_zero_off(abd_t *, size_t, size_t);
+//cksum_modi
+void abd_copy_off_cksum(abd_t *, abd_t *, size_t, size_t, size_t);
+
 
 #if defined(_KERNEL) && defined(HAVE_SPL)
 unsigned int abd_scatter_bio_map_off(struct bio *, abd_t *, unsigned int,
@@ -139,6 +142,12 @@ static inline void
 abd_copy(abd_t *dabd, abd_t *sabd, size_t size)
 {
 	abd_copy_off(dabd, sabd, 0, 0, size);
+}
+//cksum_modi
+static inline void
+abd_copy_cksum(abd_t *dabd, abd_t *sabd, size_t size)
+{
+	abd_copy_off_cksum(dabd, sabd, 0, 0, size);
 }
 
 static inline void

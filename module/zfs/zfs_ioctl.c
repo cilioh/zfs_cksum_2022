@@ -201,6 +201,9 @@
 #include "zfs_deleg.h"
 #include "zfs_comutil.h"
 
+//cksum_modi
+#include "/home/kau/zfs_cksum/include/hr_calclock.h"
+
 /*
  * Limit maximum nvlist size.  We don't want users passing in insane values
  * for zc->zc_nvlist_src_size, since we will need to allocate that much memory.
@@ -6739,6 +6742,9 @@ _init(void)
 	printk(KERN_NOTICE "ZFS: Posix ACLs disabled by kernel\n");
 #endif /* CONFIG_FS_POSIX_ACL */
 
+//cksum_modi
+	printk(KERN_ERR "==========ZFS function profiling START=========\n");
+
 	return (0);
 
 out:
@@ -6766,6 +6772,17 @@ _fini(void)
 
 	printk(KERN_NOTICE "ZFS: Unloaded module v%s-%s%s\n",
 	    ZFS_META_VERSION, ZFS_META_RELEASE, ZFS_DEBUG_STR);
+
+//cksum_modi
+	printk(KERN_ERR "==========ZFS function profiling END==========\n");
+	//printk(KERN_ERR "[abd_iterate_func2_cksum] time:%llu count:%llu\n", a_t, a_c);
+	//printk(KERN_ERR "[memcpy] time:%llu count:%llu\n", b_t, b_c);
+	printk(KERN_ERR "[zio_write] time:%llu count:%llu\n", e_t, e_c);
+	printk(KERN_ERR "[create_cksum_zio] time:%llu count:%llu\n", d_t, d_c);
+	printk(KERN_ERR "[zio_execute] time:%llu count:%llu\n", c_t, c_c);
+	printk(KERN_ERR "[cksum_zio_checksum_compute] time:%llu count:%llu\n", f_t, f_c);
+	printk(KERN_ERR "[zio_checksum_compute] time:%llu count:%llu\n", g_t, g_c);
+	printk(KERN_ERR "[barrier_cksum_zio] time:%llu count:%llu\n", h_t, h_c);
 }
 
 #ifdef HAVE_SPL

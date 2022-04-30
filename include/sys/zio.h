@@ -422,7 +422,9 @@ struct zio {
 	//cksum_modi
 	int				cksum;
 	unsigned int	id;
-	taskq_ent_t		cksum_io_tqent;
+	//taskq_ent_t		cksum_io_tqent;
+	cksum_zio_t		*cksum_zio;
+	struct abd		*cksum_io_abd;
 
 	/* Callback info */
 	zio_done_func_t	*io_ready;
@@ -491,7 +493,9 @@ struct zio {
 struct cksum_zio {
 	blkptr_t	*io_bp;
 	struct abd	*io_abd;
-	spa_t		*io_spa;
+	//spa_t		*io_spa;
+	//spa_taskqs_t	spa_zio_taskq[ZIO_TYPES][ZIO_TAKSQ_TYPES];
+	//taskq_t		**stqs_taskq;
 	uint64_t	io_size;
 	uint64_t	io_offset;
 	zio_type_t	io_type;
@@ -499,6 +503,8 @@ struct cksum_zio {
 	enum zio_child	io_child_type;
 	unsigned int	id;
 	taskq_ent_t		cksum_io_tqent;
+	unsigned int	i;
+	unsigned int	cksum;
 };
 
 extern int zio_bookmark_compare(const void *, const void *);
