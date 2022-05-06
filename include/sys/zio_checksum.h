@@ -136,6 +136,8 @@ extern void cksum_zio_checksum_compute(cksum_zio_t *, enum zio_checksum,
 extern int zio_checksum_error_impl(spa_t *, const blkptr_t *, enum zio_checksum,
     struct abd *, uint64_t, uint64_t, zio_bad_cksum_t *);
 extern int zio_checksum_error(zio_t *zio, zio_bad_cksum_t *out);
+//cksum_modi
+extern int cksum_zio_checksum_error(zio_t *zio, zio_bad_cksum_t *out);
 extern enum zio_checksum spa_dedup_checksum(spa_t *spa);
 extern void zio_checksum_templates_free(spa_t *spa);
 extern spa_feature_t zio_checksum_to_feature(enum zio_checksum cksum);

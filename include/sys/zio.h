@@ -424,7 +424,6 @@ struct zio {
 	unsigned int	id;
 	//taskq_ent_t		cksum_io_tqent;
 	cksum_zio_t		*cksum_zio;
-	struct abd		*cksum_io_abd;
 
 	/* Callback info */
 	zio_done_func_t	*io_ready;
@@ -501,10 +500,9 @@ struct cksum_zio {
 	zio_type_t	io_type;
 	zio_prop_t	io_prop;
 	enum zio_child	io_child_type;
-	unsigned int	id;
 	taskq_ent_t		cksum_io_tqent;
-	unsigned int	i;
 	unsigned int	cksum;
+	unsigned int	id;
 };
 
 extern int zio_bookmark_compare(const void *, const void *);

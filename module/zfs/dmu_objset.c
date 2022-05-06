@@ -1393,6 +1393,9 @@ dmu_objset_sync(objset_t *os, zio_t *pio, dmu_tx_t *tx)
 		sda->sda_list = os->os_dirty_dnodes[txgoff];
 		sda->sda_sublist_idx = i;
 		sda->sda_tx = tx;
+#ifdef _KERNEL
+		printk(KERN_WARNING "AAAA\n");
+#endif
 		(void) taskq_dispatch(dmu_objset_pool(os)->dp_sync_taskq,
 		    sync_dnodes_task, sda, 0);
 		/* callback frees sda */
@@ -1670,6 +1673,9 @@ dmu_objset_do_userquota_updates(objset_t *os, dmu_tx_t *tx)
 		uua->uua_sublist_idx = i;
 		uua->uua_tx = tx;
 		/* note: caller does taskq_wait() */
+#ifdef _KERNEL
+		printk(KERN_WARNING "BBBB\n");
+#endif
 		(void) taskq_dispatch(dmu_objset_pool(os)->dp_sync_taskq,
 		    userquota_updates_task, uua, 0);
 		/* callback frees uua */

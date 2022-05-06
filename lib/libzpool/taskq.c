@@ -30,6 +30,14 @@
 
 #include <sys/zfs_context.h>
 
+//ctxt_modi
+#ifdef _KERNEL
+#include <linux/uaccess.h>
+#include <linux/kernel.h>
+
+#define CKS_DEVICE_FILENAME "/dev/z_wr_cks"
+#define DP_DEVICE_FILENAME "/dev/dp_sync_taskq"
+#endif
 int taskq_now;
 taskq_t *system_taskq;
 taskq_t *system_delay_taskq;
@@ -217,13 +225,100 @@ cksum_taskq_dispatch_ent(taskq_t *tq, task_func_t func, void *arg, uint_t flags,
 	mutex_exit(&tq->tq_lock);
 }
 
+//ctxt_modi
+#ifdef _KERNEL
+int charToInt(const char *s)
+{
+	int n = 0;
+	while (isdigit(*s))
+		n = n*10 + *s++ - '0';
+	return n;
+}
 
+struct file *file_open(const char *path, int flags, int rights)
+{
+	struct file *filp = NULL;
+	mm_segment_t oldfs;
+	int err = 0;
+
+	oldfs = get_fs();
+	set_fs(get_ds());
+	filp = filp_open(path, flags, rights);
+	set_fs(oldfs);
+	if (IS_ERR(filp)) {
+		err = PTR_ERR(filp);
+		return NULL;
+	}
+	return filp;
+}
+
+void file_close(struct file *file)
+{
+	filp_close(file, NULL);
+}
+
+int file_read (struct file *file, unsigned char *buf, unsigned int size)
+{
+	mm_segment_t oldfs;
+	int ret;
+
+	oldfs = get_fs();
+	set_fs(get_ds());
+
+	ret = vfs_read(file, buf, size, &file->f_pos);
+
+	set_fs(oldfs);
+	return ret;
+}
+
+int get_cks_ctxt(taskq_t *tq)
+{
+	struct file *filp = NULL;
+	mm_segement_t fs;
+	char buff[32];
+	int ret;
+
+	filp = filp_open(CKS_DEVICE_FILENAME, O_RDONLY|O_NDELAY, 0);
+	if (NULL != filp){
+		file_read(filp, buff, 32);
+		file_close(filp);
+		return charToInt(buff);
+	}
+	else {
+		filp_close(filp, NULL);
+		return 0;
+	}
+}
+
+
+int get_dp_ctxt(taskq_t *tq)
+{
+	struct file *filp = NULL;
+	mm_segement_t fs;
+	char buff[32];
+	int ret;
+
+	filp = filp_open(DP_DEVICE_FILENAME, O_RDONLY|O_NDELAY, 0);
+	if (NULL != filp){
+		file_read(filp, buff, 32);
+		file_close(filp);
+		return charToInt(buff);
+	}
+	else {
+		filp_close(filp, NULL);
+		return 0;
+	}
+}
+
+
+
+#endif
 
 void
 taskq_wait(taskq_t *tq)
 {
 	mutex_enter(&tq->tq_lock);
-	while (tq->tq_task.tqent_next != &tq->tq_task || tq->tq_active != 0)
+	while (tq->tq_task.tqent_next != &tq->tq_task || tq->tq_nactive != 0)
 		cv_wait(&tq->tq_wait_cv, &tq->tq_lock);
 	mutex_exit(&tq->tq_lock);
 }
@@ -250,10 +345,10 @@ taskq_thread(void *arg)
 	mutex_enter(&tq->tq_lock);
 	while (tq->tq_flags & TASKQ_ACTIVE) {
 		if ((t = tq->tq_task.tqent_next) == &tq->tq_task) {
-			if (--tq->tq_active == 0)
+			if (--tq->tq_nactive == 0)
 				cv_broadcast(&tq->tq_wait_cv);
 			cv_wait(&tq->tq_dispatch_cv, &tq->tq_lock);
-			tq->tq_active++;
+			tq->tq_nactive++;
 			continue;
 		}
 		t->tqent_prev->tqent_next = t->tqent_next;
@@ -305,7 +400,9 @@ taskq_create(const char *name, int nthreads, pri_t pri,
 	cv_init(&tq->tq_maxalloc_cv, NULL, CV_DEFAULT, NULL);
 	(void) strncpy(tq->tq_name, name, TASKQ_NAMELEN);
 	tq->tq_flags = flags | TASKQ_ACTIVE;
-	tq->tq_active = nthreads;
+	tq->tq_nactive = nthreads;
+	//ctxt_modi
+	tq->tq_ctxt = 0;
 	tq->tq_nthreads = nthreads;
 	tq->tq_minalloc = minalloc;
 	tq->tq_maxalloc = maxalloc;
@@ -356,7 +453,9 @@ cksum_taskq_create(const char *name, int nthreads, pri_t pri,
 	cv_init(&tq->tq_maxalloc_cv, NULL, CV_DEFAULT, NULL);
 	(void) strncpy(tq->tq_name, name, TASKQ_NAMELEN);
 	tq->tq_flags = flags | TASKQ_ACTIVE;
-	tq->tq_active = nthreads;
+	tq->tq_nactive = nthreads;
+	//ctxt_modi
+	tq->tq_ctxt = 0;
 	tq->tq_nthreads = nthreads;
 	tq->tq_minalloc = minalloc;
 	tq->tq_maxalloc = maxalloc;

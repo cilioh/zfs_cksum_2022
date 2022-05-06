@@ -501,11 +501,9 @@ zio_checksum_error_impl(spa_t *spa, const blkptr_t *bp,
 	if (ci->ci_flags & ZCHECKSUM_FLAG_EMBEDDED) {
 		zio_cksum_t verifier;
 		size_t eck_offset;
-
 		if (checksum == ZIO_CHECKSUM_ZILOG2) {
 			zil_chain_t zilc;
 			uint64_t nused;
-
 			abd_copy_to_buf(&zilc, abd, sizeof (zil_chain_t));
 
 			eck = zilc.zc_eck;
@@ -562,6 +560,9 @@ zio_checksum_error_impl(spa_t *spa, const blkptr_t *bp,
 	} else {
 		byteswap = BP_SHOULD_BYTESWAP(bp);
 		expected_cksum = bp->blk_cksum;
+
+		//calling abd_fletcher_4_native function
+
 		ci->ci_func[byteswap](abd, size,
 		    spa->spa_cksum_tmpls[checksum], &actual_cksum);
 	}
@@ -574,6 +575,10 @@ zio_checksum_error_impl(spa_t *spa, const blkptr_t *bp,
 		info->zbc_injected = 0;
 		info->zbc_has_cksum = 1;
 	}
+
+//#ifdef _KERNEL
+//	printk(KERN_WARNING "CHECKSUM EQUAL : %d\n", ZIO_CHECKSUM_EQUAL(actual_cksum, expected_cksum));
+//#endif
 
 	if (!ZIO_CHECKSUM_EQUAL(actual_cksum, expected_cksum))
 		return (SET_ERROR(ECKSUM));
@@ -596,6 +601,56 @@ zio_checksum_error(zio_t *zio, zio_bad_cksum_t *info)
 
 	error = zio_checksum_error_impl(spa, bp, checksum, data, size,
 	    offset, info);
+
+	if (zio_injection_enabled && error == 0 && zio->io_error == 0) {
+		error = zio_handle_fault_injection(zio, ECKSUM);
+		if (error != 0)
+			info->zbc_injected = 1;
+	}
+
+	return (error);
+}
+
+
+int
+cksum_zio_checksum_error(zio_t *zio, zio_bad_cksum_t *info)
+{
+	blkptr_t *bp = zio->io_bp;
+	uint_t checksum = (bp == NULL ? zio->io_prop.zp_checksum :
+	    (BP_IS_GANG(bp) ? ZIO_CHECKSUM_GANG_HEADER : BP_GET_CHECKSUM(bp)));
+	int error;
+	uint64_t size = (bp == NULL ? zio->io_size :
+	    (BP_IS_GANG(bp) ? SPA_GANGBLOCKSIZE : BP_GET_PSIZE(bp)));
+	uint64_t offset = zio->io_offset;
+	abd_t *data = zio->io_abd;
+	spa_t *spa = zio->io_spa;
+
+//cksum_modi
+/*	cksum_zio_t *cksum_zio = zio->cksum_zio;
+	bp = cksum_zio->io_bp;
+	size = (bp == NULL ? cksum_zio->io_size :
+	    (BP_IS_GANG(bp) ? SPA_GANGBLOCKSIZE : BP_GET_PSIZE(bp)));
+	offset = cksum_zio->io_offset;
+	data = cksum_zio->io_abd;
+	*/
+//#ifdef _KERNEL
+//if(zio->id % 10000 == 0){
+//printk(KERN_WARNING "[READ][%d] [%lu][%lu] cksum:%d\n", zio->id, size, data->abd_size, (zio->cksum_zio)->cksum);
+//}
+//#endif
+		
+	//error = zio_checksum_error_impl(spa, bp, checksum, data, size,
+	//    offset, info);
+
+
+	error = zio_checksum_error_impl(spa, bp, checksum, zio->io_abd, zio->io_size,
+	    offset, info);
+
+
+
+//#ifdef _KERNEL
+//	printk(KERN_WARNING "ERROR : %d\n", error);
+//#endif
 
 	if (zio_injection_enabled && error == 0 && zio->io_error == 0) {
 		error = zio_handle_fault_injection(zio, ECKSUM);

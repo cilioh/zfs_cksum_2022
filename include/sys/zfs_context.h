@@ -460,7 +460,10 @@ typedef struct taskq {
 	kcondvar_t	tq_wait_cv;
 	kthread_t	**tq_threadlist;
 	int		tq_flags;
-	int		tq_active;
+	//ctxt_modi : change tq_active to tq_nactive
+	int		tq_nactive;
+	int		tq_ctxt;
+	//
 	int		tq_nthreads;
 	int		tq_nalloc;
 	int		tq_minalloc;
