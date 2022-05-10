@@ -1478,12 +1478,13 @@ _cksum_zio_taskq_dispatch(zio_t *zio)
 	int ctxt_tmp;
 
 #ifdef _KERNEL
-	if (zio_opt == 1 && tq->tq_nactive >= zio_nactive){
+	//if (zio_opt == 1 && tq->tq_nactive >= zio_nactive){
+	if (zio_opt == 1){
 		ctxt_tmp = get_cks_ctxt(tq);
 
 		//see current context switch overhead
 		if (ctxt_tmp != tq_ctxt){
-			tq->tq_ctxt = ctxt_tmp = tq_ctxt;
+			tq->tq_ctxt = ctxt_tmp - tq_ctxt;
 			tq_ctxt = ctxt_tmp;
 		}
 		
@@ -1498,6 +1499,10 @@ _cksum_zio_taskq_dispatch(zio_t *zio)
 			cksum_zio_checksum_generate(cksum_zio);
 			//printk(KERN_WARNING "tq->tq_nactive:%d tq->tq_ctxt:%d\n", tq->tq_nactive, tq->tq_ctxt);
 		}
+	}
+	else{
+		taskq_init_ent (&cksum_zio->cksum_io_tqent);
+		taskq_dispatch_ent(tq, (task_func_t *)cksum_zio_checksum_generate, cksum_zio, flags, &cksum_zio->cksum_io_tqent);
 	}
 #endif
 
@@ -4641,6 +4646,10 @@ MODULE_PARM_DESC(zio_opt, "zio_optimization on/off");
 //ctxt_modi
 module_param(zio_ctxt, int, 0644);
 MODULE_PARM_DESC(zio_ctxt, "Number of context switch threshold of dispatching extra threads");
+
+module_param(zio_nactive, int, 0644);
+MODULE_PARM_DESC(zio_nactive,
+	"Number of nactive threads threshold of dispatching extra threads");
 
 module_param(zio_delay_max, int, 0644);
 MODULE_PARM_DESC(zio_delay_max, "Max zio millisec delay before posting event");

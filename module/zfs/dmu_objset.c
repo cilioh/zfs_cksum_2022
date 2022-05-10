@@ -57,6 +57,9 @@
 #include <sys/policy.h>
 #include <sys/spa_impl.h>
 
+//ctxt_modi
+int zio_opt_ = 0;
+int dp_nactive = 0;
 /*
  * Needed to close a window in dnode_move() that allows the objset to be freed
  * before it can be safely accessed.
@@ -1308,7 +1311,9 @@ sync_dnodes_task(void *arg)
 	kmem_free(sda, sizeof (*sda));
 }
 
-
+//ctxt_modi
+int tq_ctxt_ = 0;
+int dp_ctxt = 0;
 /* called from dsl */
 void
 dmu_objset_sync(objset_t *os, zio_t *pio, dmu_tx_t *tx)
@@ -1387,20 +1392,50 @@ dmu_objset_sync(objset_t *os, zio_t *pio, dmu_tx_t *tx)
 		}
 	}
 
+	int wait = 0;
 	for (int i = 0;
 	    i < multilist_get_num_sublists(os->os_dirty_dnodes[txgoff]); i++) {
 		sync_dnodes_arg_t *sda = kmem_alloc(sizeof (*sda), KM_SLEEP);
 		sda->sda_list = os->os_dirty_dnodes[txgoff];
 		sda->sda_sublist_idx = i;
 		sda->sda_tx = tx;
+		//ctxt_modi
+		taskq_t *tq = dmu_objset_pool(os)->dp_sync_taskq;
+		int ctxt_tmp;
+
+		//if(zio_opt_ == 1 && tq->tq_nactive >= dp_nactive){
+		if(zio_opt_ == 1) {
 #ifdef _KERNEL
-		printk(KERN_WARNING "AAAA\n");
+			ctxt_tmp = get_dp_ctxt(tq);
+
+			//see current context switch overhead
+			if(ctxt_tmp != tq_ctxt_){
+				tq->tq_ctxt = ctxt_tmp - tq_ctxt_;
+				tq_ctxt_ = ctxt_tmp;
+			}
+
+			//printk(KERN_WARNING "[A]tq->tq_ctxt:%d dp_ctxt:%d\n", tq->tq_ctxt, dp_ctxt);
+
+			//whether to dispatch more thread or not
+			if(tq->tq_ctxt >= dp_ctxt){
+				(void) taskq_dispatch(dmu_objset_pool(os)->dp_sync_taskq,
+					sync_dnodes_task, sda, 0);
+				wait++;
+			}
+			else{
+				sync_dnodes_task(sda);
+			}
 #endif
-		(void) taskq_dispatch(dmu_objset_pool(os)->dp_sync_taskq,
-		    sync_dnodes_task, sda, 0);
+		}
+		else {
+			(void) taskq_dispatch(dmu_objset_pool(os)->dp_sync_taskq,
+				sync_dnodes_task, sda, 0);
+			wait++;
+		}
 		/* callback frees sda */
 	}
-	taskq_wait(dmu_objset_pool(os)->dp_sync_taskq);
+	if(wait != 0)
+		taskq_wait(dmu_objset_pool(os)->dp_sync_taskq);
 
 	list = &DMU_META_DNODE(os)->dn_dirty_records[txgoff];
 	while ((dr = list_head(list)) != NULL) {
@@ -1649,6 +1684,8 @@ userquota_updates_task(void *arg)
 	kmem_free(uua, sizeof (*uua));
 }
 
+//ctxt_modi
+int tq_ctxt__ = 0;
 void
 dmu_objset_do_userquota_updates(objset_t *os, dmu_tx_t *tx)
 {
@@ -1664,7 +1701,10 @@ dmu_objset_do_userquota_updates(objset_t *os, dmu_tx_t *tx)
 		    DMU_GROUPUSED_OBJECT,
 		    DMU_OT_USERGROUP_USED, DMU_OT_NONE, 0, tx));
 	}
-
+	
+	//ctxt_modi
+	taskq_t *tq = dmu_objset_pool(os)->dp_sync_taskq;
+	int ctxt_tmp;
 	for (int i = 0;
 	    i < multilist_get_num_sublists(os->os_synced_dnodes); i++) {
 		userquota_updates_arg_t *uua =
@@ -1673,11 +1713,34 @@ dmu_objset_do_userquota_updates(objset_t *os, dmu_tx_t *tx)
 		uua->uua_sublist_idx = i;
 		uua->uua_tx = tx;
 		/* note: caller does taskq_wait() */
+		//ctxt_modi
+		//if(zio_opt_ == 1 && tq->tq_nactive >= dp_nactive){
+		if(zio_opt_ == 1) {
 #ifdef _KERNEL
-		printk(KERN_WARNING "BBBB\n");
+			ctxt_tmp = get_dp_ctxt(tq);
+
+			//see current context switch overhead
+			if(ctxt_tmp != tq_ctxt__){
+				tq->tq_ctxt = ctxt_tmp - tq_ctxt__;
+				tq_ctxt__ = ctxt_tmp;
+			}
+
+			//printk(KERN_WARNING "[B]tq->tq_ctxt:%d dp_ctxt:%d\n", tq->tq_ctxt, dp_ctxt);
+
+			//whether to dispatch more thread or not
+			if(tq->tq_ctxt >= dp_ctxt){
+				(void) taskq_dispatch(dmu_objset_pool(os)->dp_sync_taskq,
+					userquota_updates_task, uua, 0);
+			}
+			else{
+				userquota_updates_task(uua);
+			}
 #endif
-		(void) taskq_dispatch(dmu_objset_pool(os)->dp_sync_taskq,
-		    userquota_updates_task, uua, 0);
+		}
+		else{
+			(void) taskq_dispatch(dmu_objset_pool(os)->dp_sync_taskq,
+					userquota_updates_task, uua, 0);
+		}
 		/* callback frees uua */
 	}
 }
@@ -2547,4 +2610,16 @@ EXPORT_SYMBOL(dmu_objset_userobjused_enabled);
 EXPORT_SYMBOL(dmu_objset_userobjspace_upgrade);
 EXPORT_SYMBOL(dmu_objset_userobjspace_upgradable);
 EXPORT_SYMBOL(dmu_objset_userobjspace_present);
+
+//ctxt_modi
+module_param(zio_opt_, int, 0644);
+MODULE_PARM_DESC(zio_opt_, "zio optimization on/off");
+
+module_param(dp_ctxt, int, 0644);
+MODULE_PARM_DESC(dp_ctxt, 
+	"Number of context switch threshold of dispatching extra threads");
+
+module_param(dp_nactive, int, 0644);
+MODULE_PARM_DESC(dp_nactive,
+	"Number of nactive threads threshold of dispatching extra threads");
 #endif

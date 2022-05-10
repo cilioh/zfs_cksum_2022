@@ -2,8 +2,8 @@
 
 
 
-cd /home/kau/spl_cksum
-sh ./jw_make.sh
+#cd /home/kau/spl_cksum
+#sh ./jw_make.sh
 
 cd /home/kau/zfs_cksum
 
