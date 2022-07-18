@@ -6777,12 +6777,28 @@ _fini(void)
 	printk(KERN_ERR "==========ZFS function profiling END==========\n");
 	//printk(KERN_ERR "[abd_iterate_func2_cksum] time:%llu count:%llu\n", a_t, a_c);
 	//printk(KERN_ERR "[memcpy] time:%llu count:%llu\n", b_t, b_c);
-	printk(KERN_ERR "[zio_write] time:%llu count:%llu\n", e_t, e_c);
-	printk(KERN_ERR "[create_cksum_zio] time:%llu count:%llu\n", d_t, d_c);
+	//printk(KERN_ERR "[zio_write] time:%llu count:%llu\n", e_t, e_c);
+	//printk(KERN_ERR "[create_cksum_zio] time:%llu count:%llu\n", d_t, d_c);
 	printk(KERN_ERR "[zio_execute] time:%llu count:%llu\n", c_t, c_c);
-	printk(KERN_ERR "[cksum_zio_checksum_compute] time:%llu count:%llu\n", f_t, f_c);
-	printk(KERN_ERR "[zio_checksum_compute] time:%llu count:%llu\n", g_t, g_c);
-	printk(KERN_ERR "[barrier_cksum_zio] time:%llu count:%llu\n", h_t, h_c);
+	printk(KERN_ERR "----------------------------------------------\n");
+	printk(KERN_ERR "[zio_write_bp_init] time:%llu count:%llu\n", aa_t, aa_c);
+	printk(KERN_ERR "[zio_issue_async] time:%llu count:%llu\n", bb_t, bb_c);
+	printk(KERN_ERR "[zio_write_compress] time:%llu count:%llu\n", cc_t, cc_c);
+	printk(KERN_ERR "[zio_checksum_generate] time:%llu count:%llu\n", dd_t, dd_c);
+	printk(KERN_ERR "[zio_dva_throttle] time:%llu count:%llu\n", ee_t, ee_c);
+	printk(KERN_ERR "[zio_dva_allocate] time:%llu count:%llu\n", ff_t, ff_c);
+	printk(KERN_ERR "[zio_ready] time:%llu count:%llu\n", gg_t, gg_c);
+	printk(KERN_ERR "[zio_vdev_io_start] time:%llu count:%llu\n", hh_t, hh_c);
+	printk(KERN_ERR "[zio_vdev_io_done] time:%llu count:%llu\n", ii_t, ii_c);
+	printk(KERN_ERR "[zio_vdev_io_assess] time:%llu count:%llu\n", jj_t, jj_c);
+	printk(KERN_ERR "[zio_done] time:%llu count:%llu\n", kk_t, kk_c);
+	printk(KERN_ERR "----------------------------------------------\n");
+	printk(KERN_ERR "[cksum_zio_taskq_dispatch] time:%llu count:%llu\n", ll_t, ll_c);
+
+
+	//printk(KERN_ERR "[cksum_zio_checksum_compute] time:%llu count:%llu\n", f_t, f_c);
+	//printk(KERN_ERR "[zio_checksum_compute] time:%llu count:%llu\n", g_t, g_c);
+	//printk(KERN_ERR "[barrier_cksum_zio] time:%llu count:%llu\n", h_t, h_c);
 }
 
 #ifdef HAVE_SPL

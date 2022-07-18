@@ -643,7 +643,7 @@ cksum_zio_checksum_error(zio_t *zio, zio_bad_cksum_t *info)
 	//    offset, info);
 
 
-	error = zio_checksum_error_impl(spa, bp, checksum, zio->io_abd, zio->io_size,
+	error = zio_checksum_error_impl(spa, bp, checksum, zio->io_orig_abd, zio->io_orig_size,
 	    offset, info);
 
 

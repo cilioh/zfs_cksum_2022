@@ -64,6 +64,7 @@ int zio_dva_throttle_enabled = B_TRUE;
 
 //cksum_modi
 int zio_opt = 0;
+int zio_opt_iss = 0;
 kmem_cache_t	*cksum_zio_cache;
 int id = 0;
 
@@ -729,8 +730,8 @@ zio_create(zio_t *pio, spa_t *spa, uint64_t txg, const blkptr_t *bp,
 
 	//taskq_init_ent(&zio->cksum_io_tqent);
 //JW
-	if(zio_opt == 1)
-		create_cksum_zio(zio);
+//	if(zio_opt != 0)
+//		create_cksum_zio(zio);
 	
 
 	return (zio);
@@ -741,8 +742,8 @@ zio_destroy(zio_t *zio)
 {
 //cksum_modi
 //JW
-	if(zio_opt == 1)
-		destroy_cksum_zio(zio);
+//	if(zio_opt != 0)
+//		destroy_cksum_zio(zio);
 
 	metaslab_trace_fini(&zio->io_alloc_list);
 	list_destroy(&zio->io_parent_list);
@@ -918,18 +919,20 @@ e_local[0] = gethrtime();
 		zio->io_prop.zp_dedup = zio->io_prop.zp_dedup_verify = B_FALSE;
 	}
 //cksum_modi
-	if(zio_opt == 1){
-		/* using cksum_zio_t structure - working */
+/*
+	if(zio_opt != 0){
+		// using cksum_zio_t structure - working
 		//JW
 		cksum_zio_t* cksum_zio = zio->cksum_zio;
 		cksum_zio->cksum = 1;
 		_cksum_zio_taskq_dispatch(zio);
 		
 		
-		/* using zio_t strucrure - not working - overlapped with compress func.*/
+		// using zio_t strucrure - not working - overlapped with compress func
 		//zio->cksum = 1;
 		//cksum_zio_taskq_dispatch(zio, ZIO_TASKQ_CKSUM, B_FALSE);
 	}
+	*/
 
 e_local[1] = gethrtime();
 calclock(e_local, &e_t, &e_c);
@@ -1313,25 +1316,31 @@ cksum_zio_checksum_generate(cksum_zio_t *cksum_zio)
 }
 
 
-
+unsigned long long ll_t=0, ll_c=0;
+int ctxt_prev_z = 0;
+int diff_prev_z = 0;
 void
 cksum_zio_taskq_dispatch(zio_t *zio, zio_taskq_type_t q, boolean_t cutinline)
 {
+hrtime_t ll_local[2];
+ll_local[0] = gethrtime();
 	spa_t *spa = zio->io_spa;
 	zio_type_t t = zio->io_type;
 	int flags = (cutinline ? TQ_FRONT : 0);
-	/*
+	
 	if (zio->io_flags & (ZIO_FLAG_CONFIG_WRITER | ZIO_FLAG_PROBE))
 		t = ZIO_TYPE_NULL;
-	
+
 	if (t == ZIO_TYPE_WRITE && zio->io_vd && zio->io_vd->vdev_aux)
 		t = ZIO_TYPE_NULL;
 
-	if (zio->io_priority == ZIO_PRIORITY_NOW &&
-	    spa->spa_zio_taskq[t][q + 1].stqs_count != 0)
-		q++;
-	*/
 	ASSERT3U(q, <, ZIO_TASKQ_TYPES);
+/*	
+	if(t == ZIO_TYPE_NULL){
+		spa_taskq_dispatch_ent(spa, t, ZIO_TASKQ_ISSUE, (task_func_t *)zio_execute, zio, flags, &zio->io_tqent);
+		return;
+	}
+*/
 	spa_taskqs_t *tqs = &spa->spa_zio_taskq[t][q];
 	taskq_t *tq;
 	
@@ -1346,22 +1355,128 @@ cksum_zio_taskq_dispatch(zio_t *zio, zio_taskq_type_t q, boolean_t cutinline)
 		tq = tqs->stqs_taskq[((uint64_t)gethrtime()) % tqs->stqs_count];
 	}
 
-//#ifdef _KERNEL
-//	printk(KERN_WARNING "[%d]cksum_zio_taskq_dispatch\n", zio->id);
-//#endif
-
 
 	ASSERT(taskq_empty_ent(&zio->io_tqent));
 
-	//taskq_dispatch_ent(tq, (task_func_t *)cksum_zio_checksum_generate, zio, flags, &zio->cksum_io_tqent);
-	
-	taskq_dispatch_ent(tq, (task_func_t *)zio_checksum_generate, zio, flags, &zio->io_tqent);
-	
-	//zio->cksum = 2;
-	
-	//spa_taskq_dispatch_ent(spa, t, q, (zio_t *)cksum_zio_checksum_generate, zio, flags, &zio->io_tqent);
-	//cksum_taskq_dispatch_ent(tq, (task_func_t *)cksum_zio_checksum_generate, zio, flags, &zio->io_tqent, 0);
+	int ctxt = 0;
+	int diff = 0;
+#ifdef _KERNEL
+	if (zio_opt != 0){
+		//ORIGINAL+DYNAMIC
+		//ctxt = get_iss_ctxt(tq);
+		ctxt = get_cks_ctxt(tq);
+
+		//if(ctxt != ctxt_prev_z){
+			//calculate current context switch overhead
+		diff = ctxt - ctxt_prev_z;
+			//diff - diff_prev_z : difference of context switch overhead
+			//if(diff != diff_prev_z){
+		tq->tq_ctxt_d = diff - diff_prev_z;
+			//}
+		diff_prev_z = diff;
+		tq->tq_ctxt = diff;
+		//}
+
+		ctxt_prev_z = ctxt;
+
+		//whether to dispatch more thread or not
+		if(zio_opt == 1){
+			if (tq->tq_ctxt_d > 0) {
+				taskq_dispatch_ent(tq, (task_func_t *)zio_checksum_generate, zio, flags, &zio->io_tqent);
+			}
+			else {
+				zio_checksum_generate(zio);
+			}
+		}
+		else{
+			if (tq->tq_ctxt_d > 0 || tq->tq_ctxt_d == 0) {
+				taskq_dispatch_ent(tq, (task_func_t *)zio_checksum_generate, zio, flags, &zio->io_tqent);
+			}
+			else {
+				zio_checksum_generate(zio);
+			}
+		
+		}
+	}
+	else {
+		taskq_dispatch_ent(tq, (task_func_t *)zio_checksum_generate, zio, flags, &zio->io_tqent);
+	}
+#endif
+
+ll_local[1] = gethrtime();
+calclock(ll_local, &ll_t, &ll_c);
+
 }
+
+int ctxt_prev_y = 0;
+int diff_prev_y = 0;
+void
+iss_zio_taskq_dispatch(zio_t *zio, zio_type_t t, zio_taskq_type_t q, boolean_t cutinline)
+{
+	spa_t *spa = zio->io_spa;
+	//zio_type_t t = zio->io_type;
+	int flags = (cutinline ? TQ_FRONT : 0);
+
+//	if (zio->io_flags & (ZIO_FLAG_CONFIG_WRITER | ZIO_FLAG_PROBE))
+//		t = ZIO_TYPE_NULL;
+
+//	if (t == ZIO_TYPE_WRITE && zio->io_vd && zio->io_vd->vdev_aux)
+//		t = ZIO_TYPE_NULL;
+
+//	if (zio->io_priority == ZIO_PRIORITY_NOW &&
+//			spa->spa_zio_taskq[t][q + 1].stqs_count != 0)
+//		q++;
+
+//	ASSERT3U(q, <, ZIO_TASKQ_TYPES);
+	//if (t == ZIO_TYPE_WRITE){
+		spa_taskqs_t *tqs = &spa->spa_zio_taskq[t][q];
+		taskq_t *tq;
+
+		ASSERT3P(tqs->stqs_taskq, !=, NULL);
+		ASSERT3U(tqs->stqs_count, !=, 0);
+
+
+
+		if(tqs->stqs_count == 1){
+			tq = tqs->stqs_taskq[0];
+		} else {
+			tq = tqs->stqs_taskq[((uint64_t)gethrtime()) % tqs->stqs_count];
+		}
+
+
+		ASSERT(taskq_empty_ent(&zio->io_tqent));
+
+		int ctxt = 0;
+		int diff = 0;
+#ifdef _KERNEL
+		//ORIGINAL+DYNAMIC
+		ctxt = get_iss_ctxt(tq);
+
+		//calculate current context switch overhead
+		diff = ctxt - ctxt_prev_y;
+		//diff - diff_prev_y : difference of context switch overhead
+		tq->tq_ctxt_d = diff - diff_prev_y;
+		diff_prev_y = diff;
+		tq->tq_ctxt = diff;
+
+		ctxt_prev_y = ctxt;
+
+		//whether to dispatch more thread or not
+		if (tq->tq_ctxt_d > 0) {
+			taskq_dispatch_ent(tq, (task_func_t *)zio_execute, zio, flags, &zio->io_tqent);
+		}
+		else {
+			zio_execute(zio);
+		}
+#endif
+/*		
+	}
+	else {
+		spa_taskq_dispatch_ent(spa, t, q, (task_func_t *)zio_execute, zio, flags, &zio->io_tqent);
+	}
+	*/
+}
+
 
 //cksum_modi
 unsigned long long d_t=0, d_c=0;
@@ -1428,13 +1543,12 @@ barrier_cksum_zio(zio_t *zio)
 	hrtime_t h_local[2];
 	h_local[0] = gethrtime();
 #ifdef _KERNEL
-	/*
 	if(zio->cksum == 1){
 		while(zio->cksum != 2){
 			barrier();
 		}
 	}
-*/
+/*
 	cksum_zio_t* cksum_zio = zio->cksum_zio;
 	if(cksum_zio->cksum == 1){
 		while(cksum_zio->cksum != 2){
@@ -1455,15 +1569,18 @@ barrier_cksum_zio(zio_t *zio)
 		(zcp)->zc_word[1] = (cksum_zcp)->zc_word[1];
 		(zcp)->zc_word[2] = (cksum_zcp)->zc_word[2];
 		(zcp)->zc_word[3] = (cksum_zcp)->zc_word[3];
-		
-	}	
+	}
+	*/
 #endif
 	h_local[1] = gethrtime();
 	calclock(h_local, &h_t, &h_c);
 }
 
 
-int tq_ctxt = 0;
+int ctxt_prev = 0;
+int diff_prev = 0;
+int check = 0;
+//param
 int zio_ctxt = 0;
 void
 _cksum_zio_taskq_dispatch(zio_t *zio)
@@ -1475,58 +1592,53 @@ _cksum_zio_taskq_dispatch(zio_t *zio)
 	spa_taskqs_t *tqs = &spa->spa_zio_taskq[zio->io_type][ZIO_TASKQ_CKSUM];
 	taskq_t *tq = tqs->stqs_taskq[0];
 	int flags = (B_FALSE ? TQ_FRONT : 0);
-	int ctxt_tmp;
+	int ctxt = 0;
+	int diff = 0;
 
 #ifdef _KERNEL
-	//if (zio_opt == 1 && tq->tq_nactive >= zio_nactive){
-	if (zio_opt == 1){
-		ctxt_tmp = get_cks_ctxt(tq);
+	if (zio_opt != 0){
+		ctxt = get_cks_ctxt(tq);
 
-		//see current context switch overhead
-		if (ctxt_tmp != tq_ctxt){
-			tq->tq_ctxt = ctxt_tmp - tq_ctxt;
-			tq_ctxt = ctxt_tmp;
+		if(ctxt != ctxt_prev){
+			//calculate current context switch overhead
+			diff = ctxt - ctxt_prev;
+			//diff - diff_prev : difference of context switch overhead
+			if(diff != diff_prev){
+				tq->tq_ctxt_d = diff - diff_prev;
+			}
+			diff_prev = diff;
+			tq->tq_ctxt = diff;
 		}
-		
-		//printk(KERN_WARNING "tq->tq_nactive:%d tq->tq_ctxt:%d\n", tq->tq_nactive, tq->tq_ctxt);
-	
+
+		ctxt_prev = ctxt;
+		check++;
+
 		//whether to dispatch more thread or not
-		if (tq->tq_ctxt >= zio_ctxt) {
-			taskq_init_ent (&cksum_zio->cksum_io_tqent);
-			taskq_dispatch_ent(tq, (task_func_t *)cksum_zio_checksum_generate, cksum_zio, flags, &cksum_zio->cksum_io_tqent);
+		if(zio_opt == 1){
+			if (tq->tq_ctxt_d > 0) {
+				taskq_init_ent (&cksum_zio->cksum_io_tqent);
+				taskq_dispatch_ent(tq, (task_func_t *)cksum_zio_checksum_generate, cksum_zio, flags, &cksum_zio->cksum_io_tqent);
+			}
+			else {
+				cksum_zio_checksum_generate(cksum_zio);
+			}
 		}
-		else {
-			cksum_zio_checksum_generate(cksum_zio);
-			//printk(KERN_WARNING "tq->tq_nactive:%d tq->tq_ctxt:%d\n", tq->tq_nactive, tq->tq_ctxt);
+		else{
+			if (tq->tq_ctxt_d < 0) {
+				taskq_init_ent (&cksum_zio->cksum_io_tqent);
+				taskq_dispatch_ent(tq, (task_func_t *)cksum_zio_checksum_generate, cksum_zio, flags, &cksum_zio->cksum_io_tqent);
+			}
+			else {
+				cksum_zio_checksum_generate(cksum_zio);
+			}
+		
 		}
 	}
-	else{
+	else {
 		taskq_init_ent (&cksum_zio->cksum_io_tqent);
 		taskq_dispatch_ent(tq, (task_func_t *)cksum_zio_checksum_generate, cksum_zio, flags, &cksum_zio->cksum_io_tqent);
 	}
 #endif
-
-
-	//taskq_init_ent(&cksum_zio->cksum_io_tqent);
-	//taskq_dispatch_ent(tq, (task_func_t *)cksum_zio_checksum_generate, cksum_zio, flags, &cksum_zio->cksum_io_tqent);
-
-
-
-
-	//cksum_zio->stqs_taskq = kmem_alloc(sizeof(taskq_t *), KM_SLEEP);
-
-	//cksum_spa->spa_zio_taskq[cksum_zio->io_type][ZIO_TASKQ_CKSUM] = spa->spa_zio_taskq[cksum_zio->io_type][ZIO_TASKQ_CKSUM];
-
-	//taskq_init_ent(&cksum_zio->cksum_io_tqent);
-
-	//cksum_zio_checksum_compute(cksum_zio, checksum, cksum_zio->io_abd, cksum_zio->io_size);
-
-//#ifdef _KERNEL
-//if(zio->id % 10000 == 0){
-//	printk(KERN_WARNING "[WRTE][%d] [%lu][%lu]\n", zio->id, cksum_zio->io_size, (cksum_zio->io_abd)->abd_size);
-//}
-//#endif
-	//taskq_dispatch_ent(tq, (task_func_t *)cksum_zio_checksum_generate, cksum_zio, flags, &cksum_zio->cksum_io_tqent);
 
 }
 
@@ -1574,10 +1686,12 @@ zio_read_bp_init(zio_t *zio)
 	return (zio);
 }
 
+unsigned long long aa_t=0, aa_c=0;
 static zio_t *
 zio_write_bp_init(zio_t *zio)
 {	
-
+hrtime_t aa_local[2];
+aa_local[0] = gethrtime();
 	if (!IO_IS_ALLOCATING(zio))
 		return (zio);
 	
@@ -1631,12 +1745,17 @@ zio_write_bp_init(zio_t *zio)
 		zio->io_pipeline = zio->io_orig_pipeline;
 	}
 
+aa_local[1] = gethrtime();
+calclock(aa_local, &aa_t, &aa_c);
 	return (zio);
 }
 
+unsigned long long cc_t=0, cc_c=0;
 static zio_t *
 zio_write_compress(zio_t *zio)
 {
+hrtime_t cc_local[2];
+cc_local[0] = gethrtime();
 	spa_t *spa = zio->io_spa;
 	zio_prop_t *zp = &zio->io_prop;
 	enum zio_compress compress = zp->zp_compress;
@@ -1696,9 +1815,6 @@ zio_write_compress(zio_t *zio)
 		    spa_max_replication(spa)) == BP_GET_NDVAS(bp));
 	}
 
-	//cksum_modi
-	//zp->zp_compress = ZIO_COMPRESS_OFF;
-	//compress = ZIO_COMPRESS_OFF;
 	/* If it's a compressed write that is not raw, compress the buffer. */
 	if (compress != ZIO_COMPRESS_OFF && psize == lsize) {
 		void *cbuf = zio_buf_alloc(lsize);
@@ -1812,6 +1928,8 @@ zio_write_compress(zio_t *zio)
 			zio->io_pipeline |= ZIO_STAGE_NOP_WRITE;
 		}
 	}
+cc_local[1] = gethrtime();
+calclock(cc_local, &cc_t, &cc_c);
 	return (zio);
 }
 
@@ -1884,7 +2002,12 @@ zio_taskq_dispatch(zio_t *zio, zio_taskq_type_t q, boolean_t cutinline)
 	 * to dispatch the zio to another taskq at the same time.
 	 */
 	ASSERT(taskq_empty_ent(&zio->io_tqent));
-	spa_taskq_dispatch_ent(spa, t, q, (task_func_t *)zio_execute, zio,
+	
+	//JW0616
+	//if(zio_opt_iss == 1 && t == ZIO_TYPE_WRITE && q == ZIO_TASKQ_ISSUE)
+	//	iss_zio_taskq_dispatch(zio, t, q, cutinline);
+	//else
+		spa_taskq_dispatch_ent(spa, t, q, (task_func_t *)zio_execute, zio,
 	    flags, &zio->io_tqent);
 }
 
@@ -1907,14 +2030,21 @@ zio_taskq_member(zio_t *zio, zio_taskq_type_t q)
 	return (B_FALSE);
 }
 
+unsigned long long bb_t=0, bb_c=0;
 static zio_t *
 zio_issue_async(zio_t *zio)
 {
+hrtime_t bb_local[2];
+bb_local[0] = gethrtime();
 //#ifdef _KERNEL
 //	printk(KERN_WARNING "[%d] zio_issue_async\n", zio->id);
 //#endif
+	
+	//ORIGINAL+DYNAMIC
+	//iss_zio_taskq_dispatch(zio, ZIO_TASKQ_ISSUE, B_FALSE);
 	zio_taskq_dispatch(zio, ZIO_TASKQ_ISSUE, B_FALSE);
-
+bb_local[1] = gethrtime();
+calclock(bb_local, &bb_t, &bb_c);
 	return (NULL);
 }
 
@@ -2059,6 +2189,8 @@ zio_execute_stack_check(zio_t *zio)
 	return (B_FALSE);
 }
 
+int ctxt_prev__ = 0;
+int diff_prev__ = 0;
 int tmp = 0;
 __attribute__((always_inline))
 static inline void
@@ -2113,13 +2245,46 @@ __zio_execute(zio_t *zio)
 
 		//cksum_modi
 
-		if(zio_opt == 1 && highbit64(stage)-1 == 4){
+		if(zio_opt != 0 && highbit64(stage)-1 == 4){
 			stage <<= 1;
 		}
-		else if(zio_opt == 1 && highbit64(stage)-1 == 6){
+		else if(zio_opt != 0 && highbit64(stage)-1 == 6){
 		//	barrier_cksum_zio(zio);
+			zio->cksum = 1;
+			cksum_zio_taskq_dispatch(zio, ZIO_TASKQ_CKSUM, B_FALSE);
 			stage <<= 1;
 		}
+
+		/*
+		int ctxt = 0;
+		int diff = 0;
+		if(zio_opt == 0 && highbit64(stage)-1 == 4){
+#ifdef _KERNEL
+			spa_t *spa = zio->io_spa;
+			spa_taskqs_t *tqs = &spa->spa_zio_taskq[zio->io_type][ZIO_TASKQ_ISSUE];
+			taskq_t *tq;
+			if(tqs->stqs_count == 1)
+				tq = tqs->stqs_taskq[0];
+			else
+				tq = tqs->stqs_taskq[((uint64_t)gethrtime()) % tqs->stqs_count];
+			
+			ctxt = get_iss_ctxt(tq);
+			if(ctxt != ctxt_prev__){
+				diff = ctxt-ctxt_prev__;
+				if(diff != diff_prev__)
+					tq->tq_ctxt_d = diff - diff_prev__;
+				diff_prev__ = diff;
+				tq->tq_ctxt = diff;
+			}
+			ctxt_prev__ = ctxt;
+		
+			if(tq->tq_ctxt_d > 0)
+				zio_taskq_dispatch(zio, ZIO_TASKQ_ISSUE, B_FALSE);
+			//else
+			stage <<= 1;
+#endif
+		}
+		*/
 
 		zio->io_stage = stage;
 		zio->io_pipeline_trace |= zio->io_stage;
@@ -3344,9 +3509,12 @@ zio_io_to_allocate(spa_t *spa)
 	return (zio);
 }
 
+unsigned long long ee_t=0, ee_c=0;
 static zio_t *
 zio_dva_throttle(zio_t *zio)
 {
+hrtime_t ee_local[2];
+ee_local[0] = gethrtime();
 	spa_t *spa = zio->io_spa;
 	zio_t *nio;
 
@@ -3372,6 +3540,8 @@ zio_dva_throttle(zio_t *zio)
 	nio = zio_io_to_allocate(zio->io_spa);
 	mutex_exit(&spa->spa_alloc_lock);
 
+ee_local[1] = gethrtime();
+calclock(ee_local, &ee_t, &ee_c);
 	return (nio);
 }
 
@@ -3390,16 +3560,19 @@ zio_allocate_dispatch(spa_t *spa)
 	ASSERT0(zio->io_error);
 
 //cksum_modi: BARRIER_REMOVE
-	if(zio_opt == 1)
+	if(zio_opt != 0)
 		barrier_cksum_zio(zio);
 
 	//calling zio_dva_throttle
 	zio_taskq_dispatch(zio, ZIO_TASKQ_ISSUE, B_TRUE);
 }
 
+unsigned long long ff_t=0, ff_c=0;
 static zio_t *
 zio_dva_allocate(zio_t *zio)
 {
+hrtime_t ff_local[2];
+ff_local[0] = gethrtime();
 	spa_t *spa = zio->io_spa;
 	metaslab_class_t *mc = spa_normal_class(spa);
 	blkptr_t *bp = zio->io_bp;
@@ -3437,7 +3610,8 @@ zio_dva_allocate(zio_t *zio)
 			return (zio_write_gang_block(zio));
 		zio->io_error = error;
 	}
-
+ff_local[1] = gethrtime();
+calclock(ff_local, &ff_t, &ff_c);
 	return (zio);
 }
 
@@ -3556,9 +3730,12 @@ zio_free_zil(spa_t *spa, uint64_t txg, blkptr_t *bp)
  * force the underlying vdev layers to call either zio_execute() or
  * zio_interrupt() to ensure that the pipeline continues with the correct I/O.
  */
+unsigned long long hh_t=0, hh_c=0;
 static zio_t *
 zio_vdev_io_start(zio_t *zio)
 {
+hrtime_t hh_local[2];
+hh_local[0] = gethrtime();
 	vdev_t *vd = zio->io_vd;
 	uint64_t align;
 	spa_t *spa = zio->io_spa;
@@ -3679,12 +3856,18 @@ zio_vdev_io_start(zio_t *zio)
 	}
 
 	vd->vdev_ops->vdev_op_io_start(zio);
+
+hh_local[1] = gethrtime();
+calclock(hh_local, &hh_t, &hh_c);
 	return (NULL);
 }
 
+unsigned long long ii_t=0, ii_c=0;
 static zio_t *
 zio_vdev_io_done(zio_t *zio)
 {
+hrtime_t ii_local[2];
+ii_local[0] = gethrtime();
 	vdev_t *vd = zio->io_vd;
 	vdev_ops_t *ops = vd ? vd->vdev_ops : &vdev_mirror_ops;
 	boolean_t unexpected_error = B_FALSE;
@@ -3726,6 +3909,8 @@ zio_vdev_io_done(zio_t *zio)
 	if (unexpected_error)
 		VERIFY(vdev_probe(vd, zio) == NULL);
 
+ii_local[1] = gethrtime();
+calclock(ii_local, &ii_t, &ii_c);
 	return (zio);
 }
 
@@ -3755,9 +3940,12 @@ zio_vsd_default_cksum_report(zio_t *zio, zio_cksum_report_t *zcr, void *ignored)
 	zcr->zcr_free = zio_abd_free;
 }
 
+unsigned long long jj_t=0, jj_c=0;
 static zio_t *
 zio_vdev_io_assess(zio_t *zio)
 {
+hrtime_t jj_local[2];
+jj_local[0] = gethrtime();
 	vdev_t *vd = zio->io_vd;
 
 	if (zio_wait_for_children(zio, ZIO_CHILD_VDEV_BIT, ZIO_WAIT_DONE)) {
@@ -3831,6 +4019,8 @@ zio_vdev_io_assess(zio_t *zio)
 		zio->io_physdone(zio->io_logical);
 	}
 
+jj_local[1] = gethrtime();
+calclock(jj_local, &jj_t, &jj_c);
 	return (zio);
 }
 
@@ -3866,13 +4056,15 @@ zio_vdev_io_bypass(zio_t *zio)
  * Generate and verify checksums
  * ==========================================================================
  */
+unsigned long long dd_t=0, dd_c=0;
 static zio_t *
 zio_checksum_generate(zio_t *zio)
 {
+hrtime_t dd_local[2];
+dd_local[0] = gethrtime();
 	blkptr_t *bp = zio->io_bp;
 	enum zio_checksum checksum;
 
-	zio->cksum = 1;
 	if (bp == NULL) {
 		/*
 		 * This is zio_write_phys().
@@ -3898,6 +4090,8 @@ zio_checksum_generate(zio_t *zio)
 	//zio_checksum_compute(zio, checksum, zio->io_orig_abd, zio->io_orig_size);
 
 	zio->cksum = 2;
+dd_local[1] = gethrtime();
+calclock(dd_local, &dd_t, &dd_c);
 	return (zio);
 }
 
@@ -3921,17 +4115,20 @@ zio_checksum_verify(zio_t *zio)
 
 
 	//zio_cksum_t *zcp = &bp->blk_cksum;
-	//error = cksum_zio_checksum_error(zio, &info);
+	error = cksum_zio_checksum_error(zio, &info);
 	//52 = EBADE invalid exchange
 
 #ifdef _KERNEL
-	//printk(KERN_WARNING "ERROR : %d\n", error);
+	if(error != 0)
+		printk(KERN_WARNING "ERROR : %d\n", error);
 	//printk(KERN_WARNING "%llu %llu %llu %llu\n", (zcp)->zc_word[0], (zcp)->zc_word[1], (zcp)->zc_word[2], (zcp)->zc_word[3]);
 #endif
 
-
 /*
 	if ((error = zio_checksum_error(zio, &info)) != 0) {
+//#ifdef _KERNEL
+//		printk(KERN_WARNING "ERROR : %d\n", error);
+//#endif
 		zio->io_error = error;
 		if (error == ECKSUM &&
 		    !(zio->io_flags & ZIO_FLAG_SPECULATIVE)) {
@@ -3984,9 +4181,12 @@ zio_worst_error(int e1, int e2)
  * I/O completion
  * ==========================================================================
  */
+unsigned long long gg_t=0, gg_c=0;
 static zio_t *
 zio_ready(zio_t *zio)
 {
+hrtime_t gg_local[2];
+gg_local[0] = gethrtime();
 	blkptr_t *bp = zio->io_bp;
 	zio_t *pio, *pio_next;
 	zio_link_t *zl = NULL;
@@ -4066,9 +4266,11 @@ zio_ready(zio_t *zio)
 		zio_handle_ignored_writes(zio);
 
 //cksum_modi: BARRIER_REMOVE
-	if(zio_opt == 1)
+	if(zio_opt != 0)
 		barrier_cksum_zio(zio);
 
+gg_local[1] = gethrtime();
+calclock(gg_local, &gg_t, &gg_c);
 	return (zio);
 }
 
@@ -4133,9 +4335,12 @@ zio_dva_throttle_done(zio_t *zio)
 	zio_allocate_dispatch(zio->io_spa);
 }
 
+unsigned long long kk_t=0, kk_c=0;
 static zio_t *
 zio_done(zio_t *zio)
 {
+hrtime_t kk_local[2];
+kk_local[0] = gethrtime();
 	/*
 	 * Always attempt to keep stack usage minimal here since
 	 * we can be called recurisvely up to 19 levels deep.
@@ -4470,7 +4675,8 @@ zio_done(zio_t *zio)
 	} else {
 		zio_destroy(zio);
 	}
-
+kk_local[1] = gethrtime();
+calclock(kk_local, &kk_t, &kk_c);
 	return (next_to_execute);
 }
 
@@ -4642,6 +4848,10 @@ EXPORT_SYMBOL(zio_data_buf_free);
 //cksum_modi
 module_param(zio_opt, int, 0644);
 MODULE_PARM_DESC(zio_opt, "zio_optimization on/off");
+
+module_param(zio_opt_iss, int, 0644);
+MODULE_PARM_DESC(zio_opt_iss, "zio_optimization on/off");
+
 
 //ctxt_modi
 module_param(zio_ctxt, int, 0644);

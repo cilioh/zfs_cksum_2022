@@ -1312,7 +1312,10 @@ sync_dnodes_task(void *arg)
 }
 
 //ctxt_modi
-int tq_ctxt_ = 0;
+int ctxt_prev_ = 0;
+int diff_prev_ = 0;
+int check_ = 0;
+//param
 int dp_ctxt = 0;
 /* called from dsl */
 void
@@ -1401,29 +1404,58 @@ dmu_objset_sync(objset_t *os, zio_t *pio, dmu_tx_t *tx)
 		sda->sda_tx = tx;
 		//ctxt_modi
 		taskq_t *tq = dmu_objset_pool(os)->dp_sync_taskq;
-		int ctxt_tmp;
+		int ctxt = 0;
+		int diff = 0;
 
 		//if(zio_opt_ == 1 && tq->tq_nactive >= dp_nactive){
-		if(zio_opt_ == 1) {
+		if(zio_opt_ != 0) {
 #ifdef _KERNEL
-			ctxt_tmp = get_dp_ctxt(tq);
+			//current context switch number
+			ctxt = get_dp_ctxt(tq);
 
-			//see current context switch overhead
-			if(ctxt_tmp != tq_ctxt_){
-				tq->tq_ctxt = ctxt_tmp - tq_ctxt_;
-				tq_ctxt_ = ctxt_tmp;
-			}
+			//if(ctxt != ctxt_prev_){
+				//calculate current context switch overhead
+			diff = ctxt-ctxt_prev_;
+				//diff - diff_prev : trend of context switch overehad
+				//if(diff != diff_prev_){
+			tq->tq_ctxt_d = diff - diff_prev_;
+					//printk(KERN_WARNING "CCCCC[%d] ctxt:%d ctxt_prev:%d diff:%d diff_prev:%d tq->tq_ctxt_d:%d\n", check_, ctxt, ctxt_prev_, diff, diff_prev_, tq->tq_ctxt_d);
+					//printk(KERN_WARNING "CCCCC[%d] tq->tq_ctxt_d:%d\n", check_, tq->tq_ctxt_d);
+				//}
+			diff_prev_ = diff;
+			tq->tq_ctxt = diff;
+			//}
+
+			ctxt_prev_ = ctxt;
+			check_++;
 
 			//printk(KERN_WARNING "[A]tq->tq_ctxt:%d dp_ctxt:%d\n", tq->tq_ctxt, dp_ctxt);
 
 			//whether to dispatch more thread or not
-			if(tq->tq_ctxt >= dp_ctxt){
-				(void) taskq_dispatch(dmu_objset_pool(os)->dp_sync_taskq,
-					sync_dnodes_task, sda, 0);
-				wait++;
+			//if(ctxt_tmp < 30000 || tq->tq_ctxt >= dp_ctxt){
+			//if(tq->tq_ctxt >= dp_ctxt){
+			//if(tq->tq_ctxt >= dp_ctxt + 500 || tq->tq_ctxt < dp_ctxt - 500) {
+			if(zio_opt_ == 1){
+				if (tq->tq_ctxt_d > 0){
+					(void) taskq_dispatch(dmu_objset_pool(os)->dp_sync_taskq,
+						sync_dnodes_task, sda, 0);
+					wait++;
+					//printk(KERN_WARNING "[D][+++] ctxt:%d nactive:%d nalloc:%d\n", tq->tq_ctxt_d, tq->tq_nactive, tq->tq_nalloc);
+				}
+				else{
+					sync_dnodes_task(sda);
+					//printk(KERN_WARNING "[D][---] ctxt:%d nactive:%d nalloc:%d\n", tq->tq_ctxt, tq->tq_nactive, tq->tq_nalloc);
+				}
 			}
 			else{
-				sync_dnodes_task(sda);
+				if (tq->tq_ctxt_d > 0 || tq->tq_ctxt_d == 0){
+					(void) taskq_dispatch(dmu_objset_pool(os)->dp_sync_taskq,
+						sync_dnodes_task, sda, 0);
+					wait++;
+				}
+				else{
+					sync_dnodes_task(sda);
+				}
 			}
 #endif
 		}
@@ -1685,7 +1717,9 @@ userquota_updates_task(void *arg)
 }
 
 //ctxt_modi
-int tq_ctxt__ = 0;
+//int ctxt_prev_ = 0;
+//int diff_prev_ = 0;
+//int check_ = 0;
 void
 dmu_objset_do_userquota_updates(objset_t *os, dmu_tx_t *tx)
 {
@@ -1704,7 +1738,9 @@ dmu_objset_do_userquota_updates(objset_t *os, dmu_tx_t *tx)
 	
 	//ctxt_modi
 	taskq_t *tq = dmu_objset_pool(os)->dp_sync_taskq;
-	int ctxt_tmp;
+	int ctxt = 0;
+	int diff = 0;
+
 	for (int i = 0;
 	    i < multilist_get_num_sublists(os->os_synced_dnodes); i++) {
 		userquota_updates_arg_t *uua =
@@ -1715,25 +1751,50 @@ dmu_objset_do_userquota_updates(objset_t *os, dmu_tx_t *tx)
 		/* note: caller does taskq_wait() */
 		//ctxt_modi
 		//if(zio_opt_ == 1 && tq->tq_nactive >= dp_nactive){
-		if(zio_opt_ == 1) {
+		if(zio_opt_ != 0) {
 #ifdef _KERNEL
-			ctxt_tmp = get_dp_ctxt(tq);
-
-			//see current context switch overhead
-			if(ctxt_tmp != tq_ctxt__){
-				tq->tq_ctxt = ctxt_tmp - tq_ctxt__;
-				tq_ctxt__ = ctxt_tmp;
-			}
+			ctxt = get_dp_ctxt(tq);
+			//printk(KERN_WARNING "BBBBB ctxt_tmp:%d\n", ctxt_tmp);
+			
+			//if(ctxt != ctxt_prev_){
+				//calculate current context switch overhead
+			diff = ctxt - ctxt_prev_;
+				//diff - tq->tq_ctxt : trend of context switch overhead
+				//if(diff != diff_prev_){
+			tq->tq_ctxt_d = diff - diff_prev_;
+					//printk(KERN_WARNING "BBBBB[%d] ctxt:%d ctxt_prev:%d diff:%d diff_prev:%d tq->tq_ctxt_d:%d\n", checkB, ctxt, ctxt_prev_, diff, diff_prev_, tq->tq_ctxt_d);
+					//printk(KERN_WARNING "BBBBB[%d] tq->tq_ctxt_d:%d\n", check_, tq->tq_ctxt_d);
+				//}
+			diff_prev_ = diff;
+			tq->tq_ctxt = diff;
+			//}
+			ctxt_prev_ = ctxt;
+			check_++;
 
 			//printk(KERN_WARNING "[B]tq->tq_ctxt:%d dp_ctxt:%d\n", tq->tq_ctxt, dp_ctxt);
 
 			//whether to dispatch more thread or not
-			if(tq->tq_ctxt >= dp_ctxt){
-				(void) taskq_dispatch(dmu_objset_pool(os)->dp_sync_taskq,
-					userquota_updates_task, uua, 0);
+			//if(ctxt_tmp < 30000 || tq->tq_ctxt >= dp_ctxt){
+			//if(tq->tq_ctxt >= dp_ctxt + 500 || tq->tq_ctxt < dp_ctxt - 500) {
+			if(zio_opt_ == 1){
+				if (tq->tq_ctxt_d > 0) {
+					(void) taskq_dispatch(dmu_objset_pool(os)->dp_sync_taskq,
+						userquota_updates_task, uua, 0);
+					//printk(KERN_WARNING "[D][+++] ctxt:%d nactive:%d nalloc:%d\n", tq->tq_ctxt_d, tq->tq_nactive, tq->tq_nalloc);
+				}
+				else{
+					userquota_updates_task(uua);
+					//printk(KERN_WARNING "[E][---] %d\n", tq->tq_ctxt);
+				}
 			}
 			else{
-				userquota_updates_task(uua);
+				if (tq->tq_ctxt_d > 0 || tq->tq_ctxt_d == 0) {
+					(void) taskq_dispatch(dmu_objset_pool(os)->dp_sync_taskq,
+						userquota_updates_task, uua, 0);
+				}
+				else{
+					userquota_updates_task(uua);
+				}
 			}
 #endif
 		}

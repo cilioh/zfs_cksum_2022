@@ -463,6 +463,7 @@ typedef struct taskq {
 	//ctxt_modi : change tq_active to tq_nactive
 	int		tq_nactive;
 	int		tq_ctxt;
+	int		tq_ctxt_d;
 	//
 	int		tq_nthreads;
 	int		tq_nalloc;

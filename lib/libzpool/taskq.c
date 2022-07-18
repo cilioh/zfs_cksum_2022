@@ -35,8 +35,10 @@
 #include <linux/uaccess.h>
 #include <linux/kernel.h>
 
+#define ISS_DEVICE_FILENAME "/dev/z_wr_iss"
 #define CKS_DEVICE_FILENAME "/dev/z_wr_cks"
 #define DP_DEVICE_FILENAME "/dev/dp_sync_taskq"
+
 #endif
 int taskq_now;
 taskq_t *system_taskq;
@@ -271,12 +273,58 @@ int file_read (struct file *file, unsigned char *buf, unsigned int size)
 	return ret;
 }
 
+
+int get_iss_ctxt(taskq_t *tq)
+{
+	struct file *filp = NULL;
+	mm_segement_t fs;
+	char buff[32];
+	int ret;
+
+	filp = filp_open(ISS_DEVICE_FILENAME, O_RDONLY|O_NDELAY, 0);
+	if (NULL != filp){
+		file_read(filp, buff, 32);
+		file_close(filp);
+		return charToInt(buff);
+	}
+	else {
+		filp_close(filp, NULL);
+		return 0;
+	}
+}
+
 int get_cks_ctxt(taskq_t *tq)
 {
 	struct file *filp = NULL;
 	mm_segement_t fs;
 	char buff[32];
 	int ret;
+/*
+	int ret;
+	int fd = open(CKS_DEVICE_FILENAME, O_RDONLY|O_NDELAY, 0);
+	if (fd == -1)
+		return 0;	
+	struct stat fileInfo = {0};
+	if (fstat(fd, &fileInfo) == -1)
+		return 0;
+	if (fileInfo.st_size == 0)
+		return 0;
+
+	char* buff = mmap(0, fileInfo.st_size,
+		PROT_READ, MAP_FILE|MAP_PRIVATE,
+		fd, 0
+	);
+	if(map == MAP_FAILED){
+		close(fd);
+		return 0;
+	}
+	else{
+		ret = charToInt(buff);
+		munmap(map, fileInfo.st_size);
+		close(fd);
+		return ret;
+	}
+*/
 
 	filp = filp_open(CKS_DEVICE_FILENAME, O_RDONLY|O_NDELAY, 0);
 	if (NULL != filp){
@@ -403,6 +451,7 @@ taskq_create(const char *name, int nthreads, pri_t pri,
 	tq->tq_nactive = nthreads;
 	//ctxt_modi
 	tq->tq_ctxt = 0;
+	tq->tq_ctxt_d = 0;
 	tq->tq_nthreads = nthreads;
 	tq->tq_minalloc = minalloc;
 	tq->tq_maxalloc = maxalloc;
@@ -456,6 +505,7 @@ cksum_taskq_create(const char *name, int nthreads, pri_t pri,
 	tq->tq_nactive = nthreads;
 	//ctxt_modi
 	tq->tq_ctxt = 0;
+	tq->tq_ctxt_d = 0;
 	tq->tq_nthreads = nthreads;
 	tq->tq_minalloc = minalloc;
 	tq->tq_maxalloc = maxalloc;
